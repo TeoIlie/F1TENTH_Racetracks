@@ -1,0 +1,8 @@
+image: Drift_large.png
+resolution: 0.011805
+origin: [-2.9358420000000003, -3.5905439999999998, 0.0]
+negate: 0
+occupied_thresh: 0.45
+free_thresh: 0.196
+# Drift_large is 1.5x the size of Drift
+# --spacing value of 1.5 used instead of default 1.0
