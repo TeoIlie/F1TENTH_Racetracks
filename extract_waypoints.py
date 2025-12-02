@@ -430,7 +430,7 @@ def write_centerline_csv(waypoints_world, w_tr_right, w_tr_left, output_path):
             w_right = w_tr_right[i]
             w_left = w_tr_left[i]
 
-            writer.writerow([f"{x_m}", f"{y_m}", f"{w_right:.1f}", f"{w_left:.1f}"])
+            writer.writerow([f"{x_m:.4f}", f"{y_m:.4f}", f"{w_right:.1f}", f"{w_left:.1f}"])
 
         # Write empty line at end (to match format of other tracks)
         writer.writerow([])

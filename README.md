@@ -13,8 +13,24 @@ New maps are created as a PNG in a tool like Photoshop, and then the provided sc
 3. Finally, `extract_waypoints.py` takes the PNG, uses `skeletonize` to extract the centerline, and saves the waypoints to the appropriate file. 
     1. Note that for this to work, only the inside (not the outside) of the track must be white, so the `skeletonize` algorithm recognizes this as the only empty space. This can easily be done using the **Paint Bucket** tool in Photoshop to fill the outer space with solid black. 
     2. Note also that the `skeletonize` generates very many waypoints which are downsampled. The precision of the downsampling can be manually configured with the `--spacing SPACING_VALUE` flag. Using a finer precision creates more points, but may be ragged due to `skeletonize` imprecision. Less precision may follow the track more loosely, but be smoother due to the cubic spline fitted to the waypoints. The image generated as `centerline_final.png` does not use a cubic spline, to see the actual track defined by a series of waypoints, load the track into the `gym` environment with rendering enabled. Experiment with the spacing value (default `0.1`) to find the best middle-ground
+4. Next, a `MAP_NAME_map.yaml` needs to be created, as follows:
+
+    ```yaml
+    image: # Set to MAP_NAME.png
+    resolution: # see comment below
+    origin: [x, y, 0.0] # see comment below
+    negate: 0 # Usually 0
+    occupied_thresh: 0.45 # Leave as-is
+    free_thresh: 0.196 # Leave as-is
+    ```
+
+    1. First, calculate a `resolution` value as desired based on how large the map should be. This can be done by extracting waypoints with `extract_waypoints.py`, setting a reasonable origin, and loading the map into the simulator, such as in `examples/pd_steer_controller.py` to see how large the rendered map is
+    2. Once the scale is satisfactory, the origi should be calculared such that the track is centered around `(0,0)`. Given an image of dimension n x n, (for example 912 x 912 pixels), the world size is `((n x resolution), (n x resolution))`. The `(x,y)` origin is then:
+        - `{[n x resolution x -(0.5)],[n x resolution x -(0.5)]}` 
+    3. The final input in the yaml file is the x,y values from above, and `0` for `z`.
 
 ## Scaling an existing map
 To scale an existing map by some factor `n`
+
 1. Multiple the `resolution` value in `[MAP NAME]_map.yaml` file by `n`, for example to double the size of a map with value `0.1`, set the value to `0.2`
 2. Reapply the `extract_waypoints.py` script. To have the same number of waypoints, pass a spacing value with `--spacing` flag multiplied by the same scaling factor `n` as the `resolution`. For ex, if you used a spacing of `1.0` for resolution `0.1`, then for double the resolution (`n=2`) of `0.2`, spacing should be `1.0 * 2 = 2.0`.
