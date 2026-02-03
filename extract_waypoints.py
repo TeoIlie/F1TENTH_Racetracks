@@ -49,7 +49,10 @@ class SkeletonTracer:
                 ny, nx = y + dy, x + dx
 
                 # Check bounds
-                if 0 <= ny < self.skeleton.shape[0] and 0 <= nx < self.skeleton.shape[1]:
+                if (
+                    0 <= ny < self.skeleton.shape[0]
+                    and 0 <= nx < self.skeleton.shape[1]
+                ):
                     if self.skeleton[ny, nx] and not self.visited[ny, nx]:
                         neighbors.append((ny, nx))
 
@@ -154,7 +157,9 @@ def extract_skeleton(track_mask):
         print("           Using largest component...")
 
         # Find largest component
-        component_sizes = [(i, np.sum(labeled == i)) for i in range(1, num_components + 1)]
+        component_sizes = [
+            (i, np.sum(labeled == i)) for i in range(1, num_components + 1)
+        ]
         largest_component = max(component_sizes, key=lambda x: x[1])[0]
 
         # Keep only largest component
@@ -242,7 +247,9 @@ def measure_path_and_calculate_waypoints(ordered_path, resolution, target_spacin
     # Convert to meters
     total_length_m = total_length_px * resolution
 
-    print(f"  Total path length: {total_length_px:.1f} pixels = {total_length_m:.2f} meters")
+    print(
+        f"  Total path length: {total_length_px:.1f} pixels = {total_length_m:.2f} meters"
+    )
 
     # Calculate number of waypoints
     num_waypoints = int(np.round(total_length_m / target_spacing))
@@ -264,7 +271,9 @@ def measure_path_and_calculate_waypoints(ordered_path, resolution, target_spacin
     loop_closure_px = np.linalg.norm(ordered_path[-1] - ordered_path[0])
     loop_closure_m = loop_closure_px * resolution
 
-    print(f"  Loop closure gap: {loop_closure_px:.1f} pixels = {loop_closure_m:.3f} meters")
+    print(
+        f"  Loop closure gap: {loop_closure_px:.1f} pixels = {loop_closure_m:.3f} meters"
+    )
 
     if loop_closure_m > 2 * target_spacing:
         print("  WARNING: Large loop closure gap detected!")
@@ -354,7 +363,9 @@ def calculate_track_widths(waypoints_px, track_mask, resolution):
 
     avg_width = np.mean(w_tr_right) + np.mean(w_tr_left)
     print(f"  Average track width: {avg_width:.3f} meters")
-    print(f"  Width range: {2*np.min(w_tr_right):.3f} - {2*np.max(w_tr_right):.3f} meters")
+    print(
+        f"  Width range: {2*np.min(w_tr_right):.3f} - {2*np.max(w_tr_right):.3f} meters"
+    )
 
     return w_tr_right, w_tr_left
 
@@ -398,8 +409,12 @@ def convert_to_world_coordinates(waypoints_px, image_shape, resolution, origin):
     waypoints_world = np.array(waypoints_world)
 
     print(f"  World coordinate range:")
-    print(f"    X: [{np.min(waypoints_world[:, 0]):.3f}, {np.max(waypoints_world[:, 0]):.3f}] meters")
-    print(f"    Y: [{np.min(waypoints_world[:, 1]):.3f}, {np.max(waypoints_world[:, 1]):.3f}] meters")
+    print(
+        f"    X: [{np.min(waypoints_world[:, 0]):.3f}, {np.max(waypoints_world[:, 0]):.3f}] meters"
+    )
+    print(
+        f"    Y: [{np.min(waypoints_world[:, 1]):.3f}, {np.max(waypoints_world[:, 1]):.3f}] meters"
+    )
 
     return waypoints_world
 
@@ -430,7 +445,9 @@ def write_centerline_csv(waypoints_world, w_tr_right, w_tr_left, output_path):
             w_right = w_tr_right[i]
             w_left = w_tr_left[i]
 
-            writer.writerow([f"{x_m:.4f}", f"{y_m:.4f}", f"{w_right:.1f}", f"{w_left:.1f}"])
+            writer.writerow(
+                [f"{x_m:.4f}", f"{y_m:.4f}", f"{w_right:.1f}", f"{w_left:.1f}"]
+            )
 
         # Write empty line at end (to match format of other tracks)
         writer.writerow([])
@@ -489,7 +506,9 @@ def validate_centerline(waypoints_world):
     }
 
 
-def visualize_centerline(img_array, waypoints_px, waypoints_world, origin, resolution, output_path):
+def visualize_centerline(
+    img_array, waypoints_px, waypoints_world, origin, resolution, output_path
+):
     """
     Step 3.1: Visualize waypoints on image.
 
@@ -509,7 +528,9 @@ def visualize_centerline(img_array, waypoints_px, waypoints_world, origin, resol
     ax.imshow(img_array, cmap="gray")
 
     # Plot the centerline
-    ax.plot(waypoints_px[:, 1], waypoints_px[:, 0], "r-", linewidth=2, label="Centerline")
+    ax.plot(
+        waypoints_px[:, 1], waypoints_px[:, 0], "r-", linewidth=2, label="Centerline"
+    )
 
     # Mark start point (green)
     ax.scatter(
@@ -586,7 +607,9 @@ def visualize_skeleton(img_array, skeleton, ordered_path, output_path):
     # Ordered path
     axes[2].imshow(img_array, cmap="gray")
     # Plot path as line
-    axes[2].plot(ordered_path[:, 1], ordered_path[:, 0], "r-", linewidth=2, label="Ordered Path")
+    axes[2].plot(
+        ordered_path[:, 1], ordered_path[:, 0], "r-", linewidth=2, label="Ordered Path"
+    )
     # Mark start point
     axes[2].scatter(
         ordered_path[0, 1],
@@ -628,8 +651,15 @@ def main():
         description="Extract centerline waypoints from track map",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--map", type=str, default=DEFAULT_MAP, help=f"Map name (default: {DEFAULT_MAP})")
-    parser.add_argument("--visualize", action="store_true", help="Create visualization plots")
+    parser.add_argument(
+        "--map",
+        type=str,
+        default=DEFAULT_MAP,
+        help=f"Map name (default: {DEFAULT_MAP})",
+    )
+    parser.add_argument(
+        "--visualize", action="store_true", help="Create visualization plots"
+    )
     parser.add_argument(
         "--spacing",
         type=float,
@@ -693,14 +723,18 @@ def main():
     ordered_path = order_skeleton_path(skeleton)
 
     # Step 2.4: Measure and calculate waypoints
-    path_info = measure_path_and_calculate_waypoints(ordered_path, resolution, args.spacing)
+    path_info = measure_path_and_calculate_waypoints(
+        ordered_path, resolution, args.spacing
+    )
 
     # Step 2.5: Subsample and calculate track widths
     waypoints_px = subsample_waypoints(ordered_path, path_info["num_waypoints"])
     w_tr_right, w_tr_left = calculate_track_widths(waypoints_px, track_mask, resolution)
 
     # Step 2.6: Convert to world coordinates
-    waypoints_world = convert_to_world_coordinates(waypoints_px, img_array.shape, resolution, origin)
+    waypoints_world = convert_to_world_coordinates(
+        waypoints_px, img_array.shape, resolution, origin
+    )
 
     # Step 2.7: Write centerline CSV
     csv_path = map_path / f"{map_name}_centerline.csv"
