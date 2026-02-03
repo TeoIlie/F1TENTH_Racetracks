@@ -16,9 +16,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument(
-        "--map", type=str, default="Drift", help="Map name (default: Drift)"
-    )
+    parser.add_argument("--map", type=str, default="Drift", help="Map name (default: Drift)")
 
     args = parser.parse_args()
 
