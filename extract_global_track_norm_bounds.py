@@ -22,7 +22,7 @@ from pathlib import Path
 # Add parent directory to path to import training_utils
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from train.training_utils import compute_global_track_bounds
+from train.train_utils import compute_global_track_bounds
 
 
 def get_all_track_names() -> list[str]:
