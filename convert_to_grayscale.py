@@ -5,9 +5,11 @@ Convert map image PNG to grayscale for use in the simulator.
 Usage:
     python3 convert_to_grayscale.py --map Drift
 """
-from PIL import Image
+
 import argparse
 from pathlib import Path
+
+from PIL import Image
 
 
 def main():

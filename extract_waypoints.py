@@ -13,14 +13,15 @@ Usage:
 """
 
 import argparse
+import csv
+from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
-from skimage.morphology import skeletonize
-from skimage.measure import label
 from scipy.ndimage import distance_transform_edt
-import matplotlib.pyplot as plt
-from pathlib import Path
-import csv
+from skimage.measure import label
+from skimage.morphology import skeletonize
 
 # Default flag values
 DEFAULT_MAP = "Drift"
@@ -250,7 +251,7 @@ def measure_path_and_calculate_waypoints(ordered_path, resolution, target_spacin
     # Ensure at least minimum number of waypoints
     if num_waypoints < 10:
         print(f"  WARNING: Only {num_waypoints} waypoints calculated.")
-        print(f"           Using minimum of 10 waypoints.")
+        print("           Using minimum of 10 waypoints.")
         num_waypoints = 10
 
     # Calculate actual spacing that will be achieved
@@ -329,7 +330,7 @@ def calculate_track_widths(waypoints_px, track_mask, resolution):
     Returns:
         Tuple of (w_tr_right, w_tr_left) as numpy arrays in meters
     """
-    print(f"\nStep 2.5b: Calculating track widths using distance transform...")
+    print("\nStep 2.5b: Calculating track widths using distance transform...")
 
     # Compute distance transform: value = distance to nearest boundary (in pixels)
     distance_map = distance_transform_edt(track_mask)
@@ -354,7 +355,7 @@ def calculate_track_widths(waypoints_px, track_mask, resolution):
 
     avg_width = np.mean(w_tr_right) + np.mean(w_tr_left)
     print(f"  Average track width: {avg_width:.3f} meters")
-    print(f"  Width range: {2*np.min(w_tr_right):.3f} - {2*np.max(w_tr_right):.3f} meters")
+    print(f"  Width range: {2 * np.min(w_tr_right):.3f} - {2 * np.max(w_tr_right):.3f} meters")
 
     return w_tr_right, w_tr_left
 
@@ -376,7 +377,7 @@ def convert_to_world_coordinates(waypoints_px, image_shape, resolution, origin):
     Returns:
         waypoints_world: Numpy array of shape (N, 2) with (x, y) in meters
     """
-    print(f"\nStep 2.6: Converting to world coordinates...")
+    print("\nStep 2.6: Converting to world coordinates...")
 
     image_height, image_width = image_shape
 
@@ -397,7 +398,7 @@ def convert_to_world_coordinates(waypoints_px, image_shape, resolution, origin):
 
     waypoints_world = np.array(waypoints_world)
 
-    print(f"  World coordinate range:")
+    print("  World coordinate range:")
     print(f"    X: [{np.min(waypoints_world[:, 0]):.3f}, {np.max(waypoints_world[:, 0]):.3f}] meters")
     print(f"    Y: [{np.min(waypoints_world[:, 1]):.3f}, {np.max(waypoints_world[:, 1]):.3f}] meters")
 
@@ -416,7 +417,7 @@ def write_centerline_csv(waypoints_world, w_tr_right, w_tr_left, output_path):
         w_tr_left: Left track widths in meters
         output_path: Path to output CSV file
     """
-    print(f"\nStep 2.7: Writing centerline CSV...")
+    print("\nStep 2.7: Writing centerline CSV...")
 
     with open(output_path, "w", newline="") as f:
         # Write header comment line directly (not using csv.writer to avoid quotes)
@@ -449,7 +450,7 @@ def validate_centerline(waypoints_world):
     Returns:
         Dictionary with validation metrics
     """
-    print(f"\n" + "=" * 70)
+    print("\n" + "=" * 70)
     print("VALIDATION")
     print("=" * 70)
 
@@ -459,7 +460,7 @@ def validate_centerline(waypoints_world):
     std_spacing = np.std(spacings)
     variation_pct = 100 * std_spacing / mean_spacing
 
-    print(f"Waypoint spacing:")
+    print("Waypoint spacing:")
     print(f"  Mean: {mean_spacing:.4f} m")
     print(f"  Std:  {std_spacing:.4f} m")
     print(f"  Variation: {variation_pct:.1f}%")
@@ -503,7 +504,7 @@ def visualize_centerline(img_array, waypoints_px, waypoints_world, origin, resol
         resolution: Meters per pixel
         output_path: Path to save visualization
     """
-    print(f"\nCreating centerline visualization...")
+    print("\nCreating centerline visualization...")
 
     fig, ax = plt.subplots(figsize=(10, 12))
     ax.imshow(img_array, cmap="gray")
@@ -566,7 +567,7 @@ def visualize_skeleton(img_array, skeleton, ordered_path, output_path):
         ordered_path: Ordered path array (y, x)
         output_path: Path to save visualization
     """
-    print(f"\nCreating skeleton visualization...")
+    print("\nCreating skeleton visualization...")
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
 
