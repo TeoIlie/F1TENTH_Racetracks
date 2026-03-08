@@ -1,5 +1,9 @@
 # Maps
 
+## Intro
+
+This repository is a fork of [f1tenth_racetracks](https://github.com/f1tenth/f1tenth_racetracks) with additional functionality for generating custom maps for use in the drifting [gym simulator](https://github.com/TeoIlie/F1TENTH_Gym).
+
 ## Format
 
 All maps are stored here, each in its own directory `"MAP_NAME"`, with these key files:
