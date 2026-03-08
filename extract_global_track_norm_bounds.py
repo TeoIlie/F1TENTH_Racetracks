@@ -10,7 +10,7 @@ is therefore ignored.
 Usage:
     python maps/extract_global_track_norm_bounds.py
 
-After running, update the constants in f1tenth_gym/envs/utils.py:
+After running, update the constants in gymkhana/envs/utils.py:
     GLOBAL_MAX_CURVATURE
     GLOBAL_MIN_WIDTH
     GLOBAL_MAX_WIDTH
@@ -46,4 +46,4 @@ if __name__ == "__main__":
     # Compute global bounds across all tracks
     bounds = compute_global_track_bounds(track_names)
 
-    print("Done! Copy the values above to f1tenth_gym/envs/utils.py")
+    print("Done! Copy the values above to gymkhana/envs/utils.py")
