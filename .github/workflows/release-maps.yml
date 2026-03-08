@@ -21,6 +21,7 @@ jobs:
                       name="${dir%/}"
                       # Skip hidden dirs and .github
                       [[ "$name" == .* ]] && continue
+                      [[ "$name" == "archives" ]] && continue
                       tar -cJf "archives/${name}.tar.xz" "$name"
                       echo "Packaged: $name"
                   done
