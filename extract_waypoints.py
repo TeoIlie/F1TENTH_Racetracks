@@ -16,79 +16,18 @@ import argparse
 import csv
 from pathlib import Path
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from scipy.interpolate import CubicSpline
 from scipy.ndimage import distance_transform_edt
-from skimage.measure import label
+from scipy.signal import savgol_filter
 from skimage.morphology import skeletonize
 
 # Default flag values
 DEFAULT_MAP = "Drift"
 DEFAULT_SPACING = 1.0
-
-
-class SkeletonTracer:
-    """Trace a skeleton image into an ordered sequential path."""
-
-    def __init__(self, skeleton):
-        """
-        Args:
-            skeleton: Binary 2D numpy array where True = skeleton pixels
-        """
-        self.skeleton = skeleton.astype(bool)
-        self.visited = np.zeros_like(skeleton, dtype=bool)
-
-    def get_neighbors(self, y, x):
-        """Get 8-connected neighbors of pixel (y, x) that are on skeleton."""
-        neighbors = []
-        for dy in [-1, 0, 1]:
-            for dx in [-1, 0, 1]:
-                if dy == 0 and dx == 0:
-                    continue
-
-                ny, nx = y + dy, x + dx
-
-                # Check bounds
-                if 0 <= ny < self.skeleton.shape[0] and 0 <= nx < self.skeleton.shape[1]:
-                    if self.skeleton[ny, nx] and not self.visited[ny, nx]:
-                        neighbors.append((ny, nx))
-
-        return neighbors
-
-    def trace_from_point(self, start_y, start_x, max_points=None):
-        """
-        Trace skeleton starting from (start_y, start_x).
-
-        Args:
-            start_y, start_x: Starting pixel coordinates
-            max_points: Maximum points to trace (None = unlimited)
-
-        Returns:
-            List of (y, x) coordinates in order
-        """
-        path = [(start_y, start_x)]
-        self.visited[start_y, start_x] = True
-
-        current_y, current_x = start_y, start_x
-
-        while True:
-            if max_points and len(path) >= max_points:
-                break
-
-            neighbors = self.get_neighbors(current_y, current_x)
-
-            if len(neighbors) == 0:
-                # No unvisited neighbors - path complete
-                break
-
-            # Choose the first available neighbor
-            # For a clean skeleton, there should be at most 2 neighbors
-            current_y, current_x = neighbors[0]
-            path.append((current_y, current_x))
-            self.visited[current_y, current_x] = True
-
-        return path
 
 
 def load_and_prepare_image(map_path, map_name):
@@ -99,7 +38,7 @@ def load_and_prepare_image(map_path, map_name):
         map_path: Path to map directory
 
     Returns:
-        track_mask: Binary numpy array (1=track, 0=walls)
+        track_mask: Binary numpy array (255=track, 0=walls)
         img_array: Original grayscale image array
     """
     print("Step 2.1: Loading and preparing image...")
@@ -115,14 +54,23 @@ def load_and_prepare_image(map_path, map_name):
 
     print(f"  Image size: {img_array.shape[1]} × {img_array.shape[0]} pixels")
 
-    # Binarize: track=1 (white), walls=0 (black)
-    track_mask = (img_array > 127).astype(np.uint8)
+    # Binarize: track=255 (white), walls=0 (black)
+    track_mask = np.where(img_array > 127, 255, 0).astype(np.uint8)
 
-    track_pixels = np.sum(track_mask)
+    track_pixels = np.sum(track_mask > 0)
     total_pixels = track_mask.size
     track_percent = 100.0 * track_pixels / total_pixels
 
     print(f"  Track pixels: {track_pixels:,} ({track_percent:.1f}%)")
+
+    # Morphological opening to remove noise, thin peninsulas, and ragged edges
+    # before skeletonization. Matches the race stack's filter_map_occupancy_grid().
+    kernel = np.ones((9, 9), np.uint8)
+    track_mask = cv2.morphologyEx(track_mask, cv2.MORPH_OPEN, kernel, iterations=2)
+
+    filtered_pixels = np.sum(track_mask > 0)
+    removed = track_pixels - filtered_pixels
+    print(f"  After morphological opening (9x9, 2 iter): {filtered_pixels:,} pixels ({removed:,} removed)")
 
     return track_mask, img_array
 
@@ -132,84 +80,151 @@ def extract_skeleton(track_mask):
     Step 2.2: Extract skeleton (centerline) using morphological skeletonization.
 
     Args:
-        track_mask: Binary numpy array (1=track, 0=walls)
+        track_mask: Binary numpy array (255=track, 0=walls)
 
     Returns:
-        skeleton: Binary numpy array (True=centerline pixels)
+        skeleton: uint8 numpy array (255=centerline pixels, 0=background)
     """
     print("\nStep 2.2: Extracting skeleton...")
 
-    # Compute medial axis (skeleton)
-    skeleton = skeletonize(track_mask)
+    # skeletonize expects a boolean or 0/1 array
+    skeleton_bool = skeletonize(track_mask > 0)
+    skeleton = (skeleton_bool * 255).astype(np.uint8)
 
-    skeleton_pixels = np.sum(skeleton)
+    skeleton_pixels = np.sum(skeleton > 0)
     print(f"  Skeleton pixels: {skeleton_pixels:,}")
-
-    # Check connectivity
-    labeled = label(skeleton, connectivity=2)
-    num_components = labeled.max()
-    print(f"  Connected components: {num_components}")
-
-    if num_components > 1:
-        print("  WARNING: Skeleton has multiple disconnected components!")
-        print("           Using largest component...")
-
-        # Find largest component
-        component_sizes = [(i, np.sum(labeled == i)) for i in range(1, num_components + 1)]
-        largest_component = max(component_sizes, key=lambda x: x[1])[0]
-
-        # Keep only largest component
-        skeleton = labeled == largest_component
-        skeleton_pixels = np.sum(skeleton)
-        print(f"  Largest component pixels: {skeleton_pixels:,}")
 
     return skeleton
 
 
-def order_skeleton_path(skeleton):
+def extract_centerline_contour(skeleton, map_resolution, expected_length_m=0.0):
     """
-    Step 2.3: Order skeleton pixels into sequential path.
+    Step 2.3: Extract centerline as an ordered closed contour from the skeleton.
+
+    Uses OpenCV contour finding on the skeleton image to directly obtain closed,
+    sequentially-ordered loops. Selects the contour whose arc length best matches
+    the expected track length (within ±15%). This replaces the previous greedy
+    neighbor-walking SkeletonTracer, which could fail at junctions and did not
+    guarantee a closed path.
+
+    Based on the ForzaETH race stack's extract_centerline() in global_planner_utils.py.
 
     Args:
-        skeleton: Binary numpy array (True=centerline pixels)
+        skeleton: uint8 numpy array (255=skeleton, 0=background)
+        map_resolution: Meters per pixel
+        expected_length_m: Expected centerline length in meters (0 = accept any)
 
     Returns:
         ordered_path: Numpy array of shape (N, 2) with (y, x) coordinates
     """
-    print("\nStep 2.3: Ordering skeleton into sequential path...")
+    print("\nStep 2.3: Extracting centerline via contour detection...")
 
-    # Find skeleton coordinates
-    skeleton_coords = np.argwhere(skeleton)  # Returns [[y1,x1], [y2,x2], ...]
+    # Find all contours with hierarchy info
+    contours, hierarchy = cv2.findContours(skeleton, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
 
-    if len(skeleton_coords) == 0:
-        raise ValueError("Skeleton is empty!")
+    if hierarchy is None or len(contours) == 0:
+        raise IOError("No contours found in skeleton image")
 
-    print(f"  Total skeleton pixels: {len(skeleton_coords)}")
+    # Keep only closed contours (those that have parent or child in the hierarchy)
+    closed_contours = []
+    for i, cont in enumerate(contours):
+        opened = hierarchy[0][i][2] < 0 and hierarchy[0][i][3] < 0
+        if not opened:
+            closed_contours.append(cont)
 
-    # Find starting point (topmost, then leftmost)
-    start_idx = np.argmin(skeleton_coords[:, 0])  # Smallest y (top of image)
-    start_y, start_x = skeleton_coords[start_idx]
+    print(f"  Total contours: {len(contours)}, closed: {len(closed_contours)}")
 
-    print(f"  Starting point: ({start_x}, {start_y}) [x, y in pixels]")
+    if len(closed_contours) == 0:
+        # Fallback: if no contours are detected as closed by hierarchy,
+        # use all contours (some maps produce only top-level contours)
+        print("  WARNING: No closed contours found via hierarchy, using all contours")
+        closed_contours = list(contours)
 
-    # Trace path
-    tracer = SkeletonTracer(skeleton)
-    path = tracer.trace_from_point(start_y, start_x)
+    # Calculate arc length of each contour and match against expected length
+    contour_lengths_m = []
+    for cont in closed_contours:
+        length_px = cv2.arcLength(cont, closed=True)
+        contour_lengths_m.append(length_px * map_resolution)
 
-    print(f"  Traced path length: {len(path)} pixels")
+    print(f"  Contour lengths (m): {[f'{l:.1f}' for l in contour_lengths_m]}")
 
-    # Convert to numpy array
-    ordered_path = np.array(path)  # Shape: (N, 2) with (y, x)
+    # Select the best contour
+    valid_indices = []
+    if expected_length_m > 0:
+        # Filter to contours within ±15% of expected length
+        for i, length_m in enumerate(contour_lengths_m):
+            if abs(expected_length_m / length_m - 1.0) < 0.15:
+                valid_indices.append(i)
 
-    # Check if we traced the full skeleton
-    traced_percent = 100.0 * len(path) / len(skeleton_coords)
-    print(f"  Coverage: {traced_percent:.1f}% of skeleton")
+    if len(valid_indices) == 0:
+        # No length filter or nothing matched: accept all
+        valid_indices = list(range(len(closed_contours)))
 
-    if traced_percent < 95:
-        print("  WARNING: Did not trace full skeleton!")
-        print("           Track may have branches or disconnections.")
+    # Take the shortest valid contour (innermost loop = centerline)
+    best_idx = min(valid_indices, key=lambda i: contour_lengths_m[i])
+    best_contour = closed_contours[best_idx]
+    best_length_m = contour_lengths_m[best_idx]
+
+    print(f"  Selected contour: {len(best_contour)} points, {best_length_m:.1f} m")
+
+    # OpenCV contours are shape (N, 1, 2) with (x, y) — convert to (N, 2) with (y, x)
+    contour_flat = best_contour.reshape(-1, 2)  # (N, 2) as (x, y)
+    ordered_path = contour_flat[:, ::-1]  # flip to (y, x) to match rest of pipeline
 
     return ordered_path
+
+
+def smooth_centerline(centerline):
+    """
+    Smooth the centerline with a two-pass Savitzky-Golay filter.
+
+    The savgol filter doesn't ensure a smooth transition at the end and beginning
+    of the centerline. That's why we apply the filter a second time with start and
+    end points on the other half of the track, then stitch the boundary regions from
+    the second pass into the first to get an overall smooth closed centerline.
+
+    Based on the ForzaETH race stack implementation in global_planner_utils.py.
+
+    Args:
+        centerline: Numpy array of shape (N, 2) with (y, x) coordinates
+
+    Returns:
+        centerline_smooth: Smoothed centerline, same shape
+    """
+    print("\nSmoothing centerline (two-pass Savitzky-Golay)...")
+
+    centerline_length = len(centerline)
+
+    # Adaptive filter length based on number of points
+    if centerline_length > 2000:
+        filter_length = int(centerline_length / 200) * 10 + 1
+    elif centerline_length > 1000:
+        filter_length = 81
+    elif centerline_length > 500:
+        filter_length = 41
+    else:
+        filter_length = 21
+
+    print(f"  Centerline points: {centerline_length}")
+    print(f"  Filter length: {filter_length} (polyorder=3)")
+
+    # Pass 1: smooth the centerline as-is
+    centerline_smooth = savgol_filter(centerline, filter_length, 3, axis=0)
+
+    # Pass 2: shift centerline by half its length so the original start/end seam
+    # is now in the middle (far from filter boundaries), then smooth again
+    cen_len = centerline_length // 2
+    centerline_shifted = np.append(centerline[cen_len:], centerline[:cen_len], axis=0)
+    centerline_smooth_shifted = savgol_filter(centerline_shifted, filter_length, 3, axis=0)
+
+    # Stitch: take the boundary regions (first and last filter_length points)
+    # from the second pass, which are smooth at the original seam location
+    centerline_smooth[:filter_length] = centerline_smooth_shifted[cen_len : (cen_len + filter_length)]
+    centerline_smooth[-filter_length:] = centerline_smooth_shifted[(cen_len - filter_length) : cen_len]
+
+    print("  Two-pass smoothing complete (seam region stitched)")
+
+    return centerline_smooth
 
 
 def measure_path_and_calculate_waypoints(ordered_path, resolution, target_spacing):
@@ -281,38 +296,62 @@ def measure_path_and_calculate_waypoints(ordered_path, resolution, target_spacin
     }
 
 
-def subsample_waypoints(ordered_path, num_waypoints):
+def interpolate_centerline(ordered_path, target_spacing_px):
     """
-    Step 2.5a: Subsample ordered path to target number of waypoints.
+    Step 2.5a: Interpolate ordered path at uniform arc-length spacing using
+    periodic cubic splines (C2 continuous at closure).
 
-    Uses simple subsampling (every Nth point) to preserve skeleton geometry
-    and maintain excellent loop closure.
+    Replaces the previous every-Nth-point subsampling, which produced uneven
+    spacing (diagonal skeleton pixels are ~1.41x farther apart). A periodic
+    CubicSpline ensures C2 smoothness everywhere, including at the lap
+    closure point.
 
     Args:
         ordered_path: Numpy array of shape (N, 2) with (y, x) coordinates in pixels
-        num_waypoints: Target number of waypoints
+        target_spacing_px: Desired spacing between waypoints in pixels
 
     Returns:
-        subsampled_path: Numpy array of shape (num_waypoints, 2)
+        interpolated_path: Numpy array of shape (M, 2) with uniformly-spaced (y, x)
     """
-    print(f"\nStep 2.5a: Subsampling to {num_waypoints} waypoints...")
+    print("\nStep 2.5a: Arc-length interpolation (periodic CubicSpline)...")
 
-    num_skeleton_points = len(ordered_path)
-    subsample_factor = num_skeleton_points // num_waypoints
+    # Compute cumulative arc length along the path
+    deltas = np.diff(ordered_path, axis=0)
+    segment_lengths = np.sqrt(np.sum(deltas**2, axis=1))
+    s = np.concatenate([[0], np.cumsum(segment_lengths)])
+    total_length = s[-1]
 
-    # Ensure we have at least some subsampling
-    if subsample_factor < 1:
-        subsample_factor = 1
+    print(f"  Total arc length: {total_length:.1f} pixels")
+    print(f"  Target spacing: {target_spacing_px:.2f} pixels")
 
-    # Take every Nth point
-    indices = np.arange(0, num_skeleton_points, subsample_factor)
+    # Close the loop: append the first point at the end so the spline wraps
+    path_closed = np.append(ordered_path, [ordered_path[0]], axis=0)
+    closure_gap = np.linalg.norm(ordered_path[-1] - ordered_path[0])
+    s_closed = np.append(s, total_length + closure_gap)
 
-    waypoints_px = ordered_path[indices]
+    # Build periodic cubic splines for y and x
+    cs_y = CubicSpline(s_closed, path_closed[:, 0], bc_type="periodic")
+    cs_x = CubicSpline(s_closed, path_closed[:, 1], bc_type="periodic")
 
-    print(f"  Subsampled from {num_skeleton_points} to {len(waypoints_px)} waypoints")
-    print(f"  Subsample factor: every {subsample_factor} pixels")
+    # Sample at uniform arc-length intervals (exclude last point = duplicate of first)
+    total_closed_length = s_closed[-1]
+    num_waypoints = max(10, int(np.round(total_closed_length / target_spacing_px)))
+    s_uniform = np.linspace(0, total_closed_length, num_waypoints, endpoint=False)
 
-    return waypoints_px
+    interpolated_y = cs_y(s_uniform)
+    interpolated_x = cs_x(s_uniform)
+    interpolated_path = np.column_stack([interpolated_y, interpolated_x])
+
+    # Verify spacing uniformity
+    check_deltas = np.diff(interpolated_path, axis=0)
+    check_dists = np.sqrt(np.sum(check_deltas**2, axis=1))
+    actual_spacing = np.mean(check_dists)
+
+    print(f"  Interpolated to {num_waypoints} waypoints")
+    print(f"  Actual mean spacing: {actual_spacing:.2f} pixels")
+    print(f"  Spacing std: {np.std(check_dists):.4f} pixels")
+
+    return interpolated_path
 
 
 def calculate_track_widths(waypoints_px, track_mask, resolution):
@@ -333,7 +372,7 @@ def calculate_track_widths(waypoints_px, track_mask, resolution):
     print("\nStep 2.5b: Calculating track widths using distance transform...")
 
     # Compute distance transform: value = distance to nearest boundary (in pixels)
-    distance_map = distance_transform_edt(track_mask)
+    distance_map = distance_transform_edt(track_mask > 0)
 
     w_tr_right = []
     w_tr_left = []
@@ -578,10 +617,11 @@ def visualize_skeleton(img_array, skeleton, ordered_path, output_path):
 
     # Skeleton overlay
     axes[1].imshow(img_array, cmap="gray")
+    skeleton_bool = skeleton > 0
     skeleton_overlay = np.zeros((*skeleton.shape, 3))
-    skeleton_overlay[skeleton, 0] = 1  # Red for skeleton
+    skeleton_overlay[skeleton_bool, 0] = 1  # Red for skeleton
     axes[1].imshow(skeleton_overlay, alpha=0.6)
-    axes[1].set_title(f"Skeleton ({np.sum(skeleton)} pixels)")
+    axes[1].set_title(f"Skeleton ({np.sum(skeleton_bool)} pixels)")
     axes[1].axis("equal")
 
     # Ordered path
@@ -695,14 +735,18 @@ def main():
     # Step 2.2: Extract skeleton
     skeleton = extract_skeleton(track_mask)
 
-    # Step 2.3: Order skeleton path
-    ordered_path = order_skeleton_path(skeleton)
+    # Step 2.3: Extract centerline as closed contour
+    ordered_path = extract_centerline_contour(skeleton, resolution)
 
-    # Step 2.4: Measure and calculate waypoints
-    path_info = measure_path_and_calculate_waypoints(ordered_path, resolution, args.spacing)
+    # Step 2.3b: Smooth the ordered path (two-pass Savitzky-Golay)
+    ordered_path = smooth_centerline(ordered_path)
 
-    # Step 2.5: Subsample and calculate track widths
-    waypoints_px = subsample_waypoints(ordered_path, path_info["num_waypoints"])
+    # Step 2.4: Measure path and report diagnostics
+    _ = measure_path_and_calculate_waypoints(ordered_path, resolution, args.spacing)
+
+    # Step 2.5: Arc-length interpolation and calculate track widths
+    target_spacing_px = args.spacing / resolution  # convert meters to pixels
+    waypoints_px = interpolate_centerline(ordered_path, target_spacing_px)
     w_tr_right, w_tr_left = calculate_track_widths(waypoints_px, track_mask, resolution)
 
     # Step 2.6: Convert to world coordinates
