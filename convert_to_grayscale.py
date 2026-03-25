@@ -41,7 +41,7 @@ def main():
 
     # Save back as grayscale
     img_gray.save(img_path)
-    print("Saved grayscale version to Drift.png")
+    print(f"Saved grayscale version as {map_name}.png")
 
 
 if __name__ == "__main__":
