@@ -50,3 +50,13 @@ To scale an existing map by some factor `n`
 
 1. Multiple the `resolution` value in `[MAP NAME]_map.yaml` file by `n`, for example to double the size of a map with value `0.1`, set the value to `0.2`
 2. Reapply the `extract_waypoints.py` script. To have the same number of waypoints, pass a spacing value with `--spacing` flag multiplied by the same scaling factor `n` as the `resolution`. For ex, if you used a spacing of `1.0` for resolution `0.1`, then for double the resolution (`n=2`) of `0.2`, spacing should be `1.0 * 2 = 2.0`.
+
+## Mirroring an existing map
+
+A quick win to increase the training domain is to mirror a map. To do so, copy & paste a map folder with a new name `<map name>_mirror`. Rename files inside with `_mirror` suffix. Mirror the map with any editor, for example install `imagemagick` and use command:
+
+```bash
+convert <map name>.png -flop <map name>_mirror.png
+```
+
+Re-create the centerline waypoints using the convenience script `mirror_centerline.py`. You now have a mirror track! You can train on both the original and mirror track to get symmetric left/right turns.

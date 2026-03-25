@@ -9,7 +9,7 @@ This script implements steps 2.1-2.4 of the Drift map extraction plan:
 4. Measure path length and calculate required waypoints
 
 Usage:
-    python3 extract_waypoints.py --map Drift [--visualize] [--spacing SPACING_VALUE]
+    python3 extract_centerline.py --map Drift [--visualize] [--spacing SPACING_VALUE]
 """
 
 import argparse
