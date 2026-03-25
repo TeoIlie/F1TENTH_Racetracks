@@ -9,7 +9,7 @@ This script implements steps 2.1-2.4 of the Drift map extraction plan:
 4. Measure path length and calculate required waypoints
 
 Usage:
-    python3 extract_centerline.py --map Drift [--visualize] [--spacing SPACING_VALUE]
+    python3 extract_centerline.py --map Drift [--visualize] [--spacing SPACING] [--smooth WINDOW]
 """
 
 import argparse
@@ -27,7 +27,8 @@ from skimage.morphology import skeletonize
 
 # Default flag values
 DEFAULT_MAP = "Drift"
-DEFAULT_SPACING = 1.0
+DEFAULT_SPACING = 0.1
+DEFAULT_SMOOTH = 0  # 0 = auto (adaptive window), >0 = override Savitzky-Golay filter length
 
 
 def load_and_prepare_image(map_path, map_name):
@@ -174,7 +175,7 @@ def extract_centerline_contour(skeleton, map_resolution, expected_length_m=0.0):
     return ordered_path
 
 
-def smooth_centerline(centerline):
+def smooth_centerline(centerline, filter_length_override=0):
     """
     Smooth the centerline with a two-pass Savitzky-Golay filter.
 
@@ -187,6 +188,7 @@ def smooth_centerline(centerline):
 
     Args:
         centerline: Numpy array of shape (N, 2) with (y, x) coordinates
+        filter_length_override: If > 0, use this window length instead of auto
 
     Returns:
         centerline_smooth: Smoothed centerline, same shape
@@ -195,15 +197,22 @@ def smooth_centerline(centerline):
 
     centerline_length = len(centerline)
 
-    # Adaptive filter length based on number of points
-    if centerline_length > 2000:
-        filter_length = int(centerline_length / 200) * 10 + 1
+    # Adaptive filter length based on number of points.
+    # Larger windows = smoother result but may cut tight corners.
+    # Must be odd and > polyorder (3).
+    if filter_length_override > 0:
+        filter_length = filter_length_override
+        # Ensure odd
+        if filter_length % 2 == 0:
+            filter_length += 1
+    elif centerline_length > 2000:
+        filter_length = int(centerline_length / 100) * 10 + 1
     elif centerline_length > 1000:
-        filter_length = 81
+        filter_length = 151
     elif centerline_length > 500:
-        filter_length = 41
+        filter_length = 81
     else:
-        filter_length = 21
+        filter_length = 41
 
     print(f"  Centerline points: {centerline_length}")
     print(f"  Filter length: {filter_length} (polyorder=3)")
@@ -682,6 +691,12 @@ def main():
         default=DEFAULT_SPACING,
         help=f"Target waypoint spacing in meters (default: {DEFAULT_SPACING})",
     )
+    parser.add_argument(
+        "--smooth",
+        type=int,
+        default=DEFAULT_SMOOTH,
+        help=f"Override Savitzky-Golay filter window length (must be odd, {DEFAULT_SMOOTH}=auto)",
+    )
 
     args = parser.parse_args()
 
@@ -739,7 +754,7 @@ def main():
     ordered_path = extract_centerline_contour(skeleton, resolution)
 
     # Step 2.3b: Smooth the ordered path (two-pass Savitzky-Golay)
-    ordered_path = smooth_centerline(ordered_path)
+    ordered_path = smooth_centerline(ordered_path, filter_length_override=args.smooth)
 
     # Step 2.4: Measure path and report diagnostics
     _ = measure_path_and_calculate_waypoints(ordered_path, resolution, args.spacing)
